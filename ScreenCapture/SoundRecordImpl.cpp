@@ -106,20 +106,20 @@ int ScreenRecordImpl::OpenAudio()
 	AVCodec *decoder = nullptr;
 
 	qDebug() << GetSpeakerDeviceName();
-	const char *speaker = GetSpeakerDeviceName().toStdString().c_str();
-	//AVDictionary* options = NULL;
+	qDebug() << GetMicrophoneDeviceName();
+	QString audioDeviceName = "audio=" + GetMicrophoneDeviceName();
+	//AVDictionary* options = nullptr;
 	//av_dict_set(&options, "list_devices", "true", 0);
 	//AVInputFormat *iformat = av_find_input_format("dshow");
-	//printf("Device Info=============");
+	//qDebug() << "Device Info=============";
 	//avformat_open_input(&m_aFmtCtx, "audio=dummy", iformat, &options);
-	//printf("========================");
-	qDebug() << GetMicrophoneDeviceName();
+	//qDebug() << "========================";
 
 	//查找输入方式
 	AVInputFormat *ifmt = av_find_input_format("dshow");
-	char * deviceName = dup_wchar_to_utf8(L"audio=麦克风 (Conexant SmartAudio HD)"); 
+	//char * deviceName = dup_wchar_to_utf8(L"audio=麦克风 (Conexant SmartAudio HD)"); 
 	//char * deviceName = dup_wchar_to_utf8(L"audio=麦克风 (High Definition Audio 设备)");
-	if (avformat_open_input(&m_aFmtCtx, deviceName, ifmt, nullptr) < 0)
+	if (avformat_open_input(&m_aFmtCtx, audioDeviceName.toStdString().c_str(), ifmt, nullptr) < 0)
 	{
 		qDebug() << "Can not open audio input stream";
 		return -1;
@@ -220,6 +220,7 @@ int ScreenRecordImpl::OpenOutput()
 			}
 		}
 		m_aEncodeCtx->channels = av_get_channel_layout_nb_channels(m_aEncodeCtx->channel_layout);
+		m_aEncodeCtx->time_base = AVRational{ 1, m_aEncodeCtx->sample_rate };
 		aStream->time_base = AVRational{ 1, m_aEncodeCtx->sample_rate };
 
 		m_aEncodeCtx->codec_tag = 0;
@@ -411,14 +412,13 @@ AVFrame* ScreenRecordImpl::AllocAudioFrame(AVCodecContext* c, int nbSamples)
 void ScreenRecordImpl::FlushEncoder()
 {
 	int ret = -1;
+	int nFlush = 0;
 	AVPacket pkt = { 0 };
 	av_init_packet(&pkt);
 	ret = avcodec_send_frame(m_aEncodeCtx, nullptr);
 	qDebug() << "flush audio avcodec_send_frame ret: " << ret;
-
 	while (ret >= 0)
 	{
-		qDebug() << "flush";
 		ret = avcodec_receive_packet(m_aEncodeCtx, &pkt);
 		if (ret < 0)
 		{
@@ -426,6 +426,7 @@ void ScreenRecordImpl::FlushEncoder()
 			if (ret == AVERROR(EAGAIN))
 			{
 				qDebug() << "flush EAGAIN avcodec_receive_packet";
+				ret = 1;
 				continue;
 			}
 			else if (ret == AVERROR_EOF)
@@ -436,16 +437,16 @@ void ScreenRecordImpl::FlushEncoder()
 			qDebug() << "flush audio avcodec_receive_packet failed, ret: " << ret;
 			return;
 		}
+		++nFlush;
+		pkt.stream_index = m_aOutIndex;
+		ret = av_interleaved_write_frame(m_oFmtCtx, &pkt);
+		if (ret == 0)
+			qDebug() << "flush write audio packet id: " << ++g_encodeFrameCnt;
+		else
+			qDebug() << "flush audio av_interleaved_write_frame failed, ret: " << ret;
+		av_free_packet(&pkt);
 	}
-	pkt.stream_index = m_aOutIndex;
-
-	ret = av_interleaved_write_frame(m_oFmtCtx, &pkt);
-	if (ret == 0)
-		qDebug() << "flush write audio packet id: " << ++g_encodeFrameCnt;
-	else
-		qDebug() << "flush audio av_interleaved_write_frame failed, ret: " << ret;
-
-	av_free_packet(&pkt);
+	qDebug() << "flush times: " << nFlush;
 }
 
 void ScreenRecordImpl::Release()

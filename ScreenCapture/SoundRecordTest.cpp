@@ -5,7 +5,7 @@
 ScreenRecord::ScreenRecord(QObject *parent) :
 	QObject(parent)
 {
-	m_args["filePath"] = "test.aac";
+	m_args["filePath"] = "test.mp3";
 	m_args["bit_rate"] = 128000;
 
 	ScreenRecordImpl *sr = new ScreenRecordImpl(this);
