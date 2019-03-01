@@ -1,5 +1,6 @@
 #pragma once
 #include <QObject>
+#include <QVariant>
 
 class ScreenRecord : public QObject
 {
@@ -7,4 +8,6 @@ class ScreenRecord : public QObject
 public:
 	ScreenRecord(QObject *parent = Q_NULLPTR);
 
+private:
+	QVariantMap m_args;
 };

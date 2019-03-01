@@ -33,26 +33,49 @@ ScreenRecordImpl::ScreenRecordImpl(QObject * parent) :
 	, m_aIndex(-1)
 	, m_aFmtCtx(nullptr), m_oFmtCtx(nullptr)
 	, m_aDecodeCtx(nullptr)
+	, m_aEncodeCtx(nullptr)
 	, m_aFifoBuf(nullptr)
 	, m_stop(false)
+	, m_state(RecordState::NotStarted)
 {
+}
+
+void ScreenRecordImpl::Init(const QVariantMap& map)
+{
+	m_filePath = map["filePath"].toString();
+	m_bitrate = map["bit_rate"].toInt();
 }
 
 void ScreenRecordImpl::Start()
 {
-		m_filePath = "test.mp3";
+	if (m_state == RecordState::NotStarted)
+	{
+		qDebug() << "start record";
+		m_state = RecordState::Started;
 		std::thread recordThread(&ScreenRecordImpl::RecordAudioThreadProc, this);
 		recordThread.detach();
+	}
+	else if (m_state == RecordState::Paused)
+	{
+		qDebug() << "continue record";
+		m_state = RecordState::Started;
+		m_cvNotPause.notify_one();
+	}
 }
 
 void ScreenRecordImpl::Pause()
 {
+	qDebug() << "pause record";
+	m_state = RecordState::Paused;
 }
-
 
 void ScreenRecordImpl::Stop()
 {
-	m_stop = true;
+	qDebug() << "stop record";
+	RecordState state = m_state;
+	m_state = RecordState::Stopped;
+	if (state == RecordState::Paused)
+		m_cvNotPause.notify_one();
 }
 
 static char *dup_wchar_to_utf8(wchar_t *w)
@@ -96,7 +119,6 @@ int ScreenRecordImpl::OpenAudio()
 	AVInputFormat *ifmt = av_find_input_format("dshow");
 	char * deviceName = dup_wchar_to_utf8(L"audio=麦克风 (Conexant SmartAudio HD)"); 
 	//char * deviceName = dup_wchar_to_utf8(L"audio=麦克风 (High Definition Audio 设备)");
-	//char * deviceName = "audio=virtual-audio-capturer";
 	if (avformat_open_input(&m_aFmtCtx, deviceName, ifmt, nullptr) < 0)
 	{
 		qDebug() << "Can not open audio input stream";
@@ -139,8 +161,8 @@ int ScreenRecordImpl::OpenOutput()
 {
 	int ret = -1;
 	AVStream *vStream = nullptr, *aStream = nullptr;
-	const char *outFileName = "test.mp3";
-	ret = avformat_alloc_output_context2(&m_oFmtCtx, nullptr, nullptr, outFileName);
+	string filePath = m_filePath.toStdString();
+	ret = avformat_alloc_output_context2(&m_oFmtCtx, nullptr, nullptr, filePath.c_str());
 	if (ret < 0)
 	{
 		qDebug() << "avformat_alloc_output_context2 failed";
@@ -175,7 +197,7 @@ int ScreenRecordImpl::OpenOutput()
 		//	return -1;
 		//}
 		m_aEncodeCtx->sample_fmt = encoder->sample_fmts ? encoder->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
-		m_aEncodeCtx->bit_rate = 64000;
+		m_aEncodeCtx->bit_rate = m_bitrate;
 		m_aEncodeCtx->sample_rate = 44100;
 		if (encoder->supported_samplerates) 
 		{
@@ -208,7 +230,6 @@ int ScreenRecordImpl::OpenOutput()
 			qDebug() << "Encoder does not support sample format " << av_get_sample_fmt_name(m_aEncodeCtx->sample_fmt);
 			return -1;
 		}
-
 		//打开音频编码器，打开后frame_size被设置
 		ret = avcodec_open2(m_aEncodeCtx, encoder, 0);
 		if (ret < 0)
@@ -223,7 +244,6 @@ int ScreenRecordImpl::OpenOutput()
 			qDebug() << "Output audio avcodec_parameters_from_context,error code:" << ret;
 			return -1;
 		}
-
 		m_swrCtx = swr_alloc();
 		if (!m_swrCtx)
 		{
@@ -236,24 +256,21 @@ int ScreenRecordImpl::OpenOutput()
 		av_opt_set_int(m_swrCtx, "out_channel_count", m_aEncodeCtx->channels, 0);	//2
 		av_opt_set_int(m_swrCtx, "out_sample_rate", m_aEncodeCtx->sample_rate, 0);	//44100
 		av_opt_set_sample_fmt(m_swrCtx, "out_sample_fmt", m_aEncodeCtx->sample_fmt, 0);	//AV_SAMPLE_FMT_FLTP
-
 		if ((ret = swr_init(m_swrCtx)) < 0) 
 		{
 			qDebug() << "swr_init failed";
 			return -1;
 		}
 	}
-
 	//打开输出文件
 	if (!(m_oFmtCtx->oformat->flags & AVFMT_NOFILE))
 	{
-		if (avio_open(&m_oFmtCtx->pb, outFileName, AVIO_FLAG_WRITE) < 0)
+		if (avio_open(&m_oFmtCtx->pb, filePath.c_str(), AVIO_FLAG_WRITE) < 0)
 		{
 			printf("can not open output file handle!\n");
 			return -1;
 		}
 	}
-
 	//写文件头
 	if (avformat_write_header(m_oFmtCtx, nullptr) < 0)
 	{
@@ -431,6 +448,36 @@ void ScreenRecordImpl::FlushEncoder()
 	av_free_packet(&pkt);
 }
 
+void ScreenRecordImpl::Release()
+{
+	if (m_oFmtCtx)
+	{
+		avio_close(m_oFmtCtx->pb);
+		avformat_free_context(m_oFmtCtx);
+		m_oFmtCtx = nullptr;
+	}
+	if (m_aDecodeCtx)
+	{
+		avcodec_free_context(&m_aDecodeCtx);
+		m_aDecodeCtx = nullptr;
+	}
+	if (m_aEncodeCtx)
+	{
+		avcodec_free_context(&m_aEncodeCtx);
+		m_aEncodeCtx = nullptr;
+	}
+	if (m_aFifoBuf)
+	{
+		av_audio_fifo_free(m_aFifoBuf);
+		m_aFifoBuf = nullptr;
+	}
+	if (m_aFmtCtx)
+	{
+		avformat_close_input(&m_aFmtCtx);
+		m_aFmtCtx = nullptr;
+	}
+}
+
 void ScreenRecordImpl::RecordAudioThreadProc()
 {
 	int ret = -1;
@@ -466,7 +513,7 @@ void ScreenRecordImpl::RecordAudioThreadProc()
 
 	while (1)
 	{
-		if (m_stop)
+		if (m_state == RecordState::Stopped && !done)
 			done = true;
 		if (done)
 		{
@@ -494,6 +541,7 @@ void ScreenRecordImpl::RecordAudioThreadProc()
 
 		AVPacket pkt = { 0 };
 		av_init_packet(&pkt);
+		//m_aEncodeCtx->frame_size要等于aFrame->nb_samples，不要会报错
 		ret = avcodec_send_frame(m_aEncodeCtx, aFrame);
 		if (ret != 0)
 		{
@@ -524,33 +572,10 @@ void ScreenRecordImpl::RecordAudioThreadProc()
 		av_frame_free(&aFrame);
 		av_free_packet(&pkt);
 	}
+
 	FlushEncoder();
-
 	av_write_trailer(m_oFmtCtx);
-
-	avio_close(m_oFmtCtx->pb);
-	avformat_free_context(m_oFmtCtx);
-
-	if (m_aDecodeCtx)
-	{
-		avcodec_free_context(&m_aDecodeCtx);
-		m_aDecodeCtx = nullptr;
-	}
-	if (m_aEncodeCtx)
-	{
-		avcodec_free_context(&m_aEncodeCtx);
-		m_aEncodeCtx = nullptr;
-	}
-	if (m_aFifoBuf)
-	{
-		av_audio_fifo_free(m_aFifoBuf);
-		m_aFifoBuf = nullptr;
-	}
-	if (m_aFmtCtx)
-	{
-		avformat_close_input(&m_aFmtCtx);
-		m_aFmtCtx = nullptr;
-	}
+	Release();
 	qDebug() << "parent thread exit";
 }
 
@@ -567,8 +592,13 @@ void ScreenRecordImpl::AcquireSoundThreadProc()
 	maxDstNbSamples = dstNbSamples = av_rescale_rnd(nbSamples, 
 		m_aEncodeCtx->sample_rate, m_aDecodeCtx->sample_rate, AV_ROUND_UP);
 
-	while (!m_stop)
+	while (m_state != RecordState::Stopped)
 	{
+		if (m_state == RecordState::Paused)
+		{
+			unique_lock<mutex> lk(m_mtxPause);
+			m_cvNotPause.wait(lk, [this] { return m_state != RecordState::Paused; });
+		}
 		if (av_read_frame(m_aFmtCtx, &pkg) < 0)
 		{
 			qDebug() << "audio av_read_frame < 0";
@@ -591,9 +621,7 @@ void ScreenRecordImpl::AcquireSoundThreadProc()
 			av_packet_unref(&pkg);
 			continue;
 		}
-		//qDebug() << "rawFrame nbSamples: " << rawFrame->nb_samples;
 		//1152->22050
-		//nbSamples换rawFrame->nb_samples
 		dstNbSamples = av_rescale_rnd(swr_get_delay(m_swrCtx, m_aDecodeCtx->sample_rate) + rawFrame->nb_samples,
 			m_aEncodeCtx->sample_rate, m_aDecodeCtx->sample_rate, AV_ROUND_UP);
 		if (dstNbSamples > maxDstNbSamples)
@@ -621,7 +649,6 @@ void ScreenRecordImpl::AcquireSoundThreadProc()
 		//	qDebug() << "av_frame_make_writable failed";
 		//	return;
 		//}
-
 		newFrame->nb_samples = swr_convert(m_swrCtx, newFrame->data, dstNbSamples,
 			(const uint8_t **)rawFrame->data, rawFrame->nb_samples);
 		if (newFrame->nb_samples < 0)
@@ -629,7 +656,6 @@ void ScreenRecordImpl::AcquireSoundThreadProc()
 			qDebug() << "swr_convert failed";
 			return;
 		}
-		//qDebug() << "newFrame nb_samples: " << newFrame->nb_samples;
 		{
 			unique_lock<mutex> lk(m_mtx);
 			m_cvNotFull.wait(lk, [newFrame, this] { return av_audio_fifo_space(m_aFifoBuf) >= newFrame->nb_samples; });

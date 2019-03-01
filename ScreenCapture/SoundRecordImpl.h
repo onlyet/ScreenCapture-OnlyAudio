@@ -33,8 +33,17 @@ struct SwrContext;
 class ScreenRecordImpl : public QObject
 {
 	Q_OBJECT
+private:
+	enum RecordState {
+		NotStarted,
+		Started,
+		Paused,
+		Stopped,
+		Unknown,
+	};
 public:
 	ScreenRecordImpl(QObject * parent = Q_NULLPTR);
+	void Init(const QVariantMap& map);
 
 	private slots :
 	void Start();
@@ -53,28 +62,29 @@ private:
 	AVFrame* AllocAudioFrame(AVCodecContext* c, int nbSamples);
 	//取出编码器里的帧，写入输出流
 	void FlushEncoder();
+	void Release();
 
 private:
-	QString				m_filePath;
+	QString						m_filePath;
+	int							m_bitrate;
+	int							m_aIndex;	//输入音频流索引
+	int							m_aOutIndex;//输出音频流索引
+	AVFormatContext				*m_aFmtCtx;
+	AVFormatContext				*m_oFmtCtx;
+	AVCodecContext				*m_aDecodeCtx;
+	AVCodecContext				*m_aEncodeCtx;
+	SwrContext					*m_swrCtx;
+	AVAudioFifo					*m_aFifoBuf;
 
-	int m_aIndex;		//输入音频流索引
-	int m_aOutIndex;	//输出音频流索引
-	AVFormatContext		*m_aFmtCtx;
-	AVFormatContext		*m_oFmtCtx;
-	AVCodecContext		*m_aDecodeCtx;
-	AVCodecContext		*m_aEncodeCtx;
-	SwrContext			*m_swrCtx;
-	AVAudioFifo			*m_aFifoBuf;
-
-	//AVFrame				*m_aOutFrame;
-	//uint8_t				*m_aOutFrameBuf;
-	int					m_aOutFrameSize;	//一个音频帧包含的样本数
-	std::atomic_bool	m_stop;
+	std::atomic_bool			m_stop;
 
 	//Frame里单个通道的样本数
 	//暂时把输入流所有的nb_samples当做一样的
-	int					m_nbSamples;	
-	std::mutex			m_mtx;
-	std::condition_variable	m_cvNotEmpty;
-	std::condition_variable m_cvNotFull;
+	int							m_nbSamples;	
+	std::mutex					m_mtx;
+	std::condition_variable		m_cvNotEmpty;	//当fifoBuf空了，编码线程挂起
+	std::condition_variable		m_cvNotFull;	//当fifoBuf满了，采集线程挂起
+	std::mutex					m_mtxPause;
+	std::condition_variable		m_cvNotPause;	//当点击暂停的时候，采集线程挂起
+	RecordState					m_state;
 };

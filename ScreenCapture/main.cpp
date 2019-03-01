@@ -1,6 +1,5 @@
 #include <QApplication>
-#include "ScreenRecordImpl.h"
-#include "ScreenRecordTest.h"
+#include "SoundRecordTest.h"
 
 int main(int argc, char *argv[])
 {

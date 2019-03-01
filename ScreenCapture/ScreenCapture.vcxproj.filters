@@ -30,30 +30,21 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="ScreenCatureDemo.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ScreenRecordImpl.cpp">
+    <ClCompile Include="SoundRecordImpl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ScreenRecordTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="muxing.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="resampling_audio.c">
+    <ClCompile Include="SoundRecordTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <QtMoc Include="ScreenRecordImpl.h">
+    <QtMoc Include="SoundRecordImpl.h">
       <Filter>Header Files</Filter>
     </QtMoc>
-    <QtMoc Include="ScreenRecordTest.h">
+    <QtMoc Include="SoundRecordTest.h">
       <Filter>Header Files</Filter>
     </QtMoc>
   </ItemGroup>
