@@ -425,13 +425,13 @@ void ScreenRecordImpl::FlushEncoder()
 			av_packet_unref(&pkt);
 			if (ret == AVERROR(EAGAIN))
 			{
-				qDebug() << "flush EAGAIN avcodec_receive_packet";
+				qDebug() << "flush audio EAGAIN avcodec_receive_packet";
 				ret = 1;
 				continue;
 			}
 			else if (ret == AVERROR_EOF)
 			{
-				qDebug() << "flush video encoder finished";
+				qDebug() << "flush audio encoder finished";
 				break;
 			}
 			qDebug() << "flush audio avcodec_receive_packet failed, ret: " << ret;
@@ -627,7 +627,7 @@ void ScreenRecordImpl::AcquireSoundThreadProc()
 			m_aEncodeCtx->sample_rate, m_aDecodeCtx->sample_rate, AV_ROUND_UP);
 		if (dstNbSamples > maxDstNbSamples)
 		{
-			qDebug() << ">>>";
+			qDebug() << "newFrame realloc";
 			av_freep(&newFrame->data[0]);
 			//nb_samples*nb_channels*Bytes_sample_fmt
 			ret = av_samples_alloc(newFrame->data, newFrame->linesize, m_aEncodeCtx->channels,
